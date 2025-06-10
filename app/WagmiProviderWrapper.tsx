@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { WagmiProvider } from "wagmi"
 import { RainbowKitProvider, getDefaultConfig } from "@rainbow-me/rainbowkit"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { avalanche, optimism } from "viem/chains"
+import { avalanche, optimism, baseSepolia, base, avalancheFuji } from "viem/chains"
 import "@rainbow-me/rainbowkit/styles.css" 
 
 // Initialize TanStack Query client
@@ -14,7 +14,7 @@ const queryClient = new QueryClient()
 const config = getDefaultConfig({
   appName: "Lucra App",
   projectId: "773755cc8d60c42417a9024fe65d88dc", 
-  chains: [avalanche, optimism],
+  chains: [avalanche, avalancheFuji],
   ssr: true,
 })
 
