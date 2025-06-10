@@ -1,15 +1,31 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Circle } from "lucide-react"
 import { useAccount } from "wagmi"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
 import { useTheme } from "next-themes"
 
-// Supported chains for display
 const supportedChains = [
-  { id: 43114, name: "Avalanche", icon: "" },
-  { id: 1, name: "Ethereum", icon: <Circle className="h-4 w-4" /> },
+  {
+    id: 43114,
+    name: "Avalanche",
+    icon: <img src="/assets/avalanche-avax-vector-logo-seeklogo/avalanche-avax-seeklogo.png" alt="Avalanche" className="h-4 w-4" />,
+  },
+  {
+    id: 43113,
+    name: "Avalanche Fuji",
+    icon: <img src="/assets/avalanche-avax-vector-logo-seeklogo/avalanche-avax-seeklogo.png" alt="Avalanche Fuji" className="h-4 w-4" />,
+  },
+  {
+    id: 8453,
+    name: "Base",
+    icon: <img src="/assets/Base/Base_Network_Logo.png" alt="Avalanche Fuji" className="h-4 w-4" />,
+  },
+  {
+    id: 84532,
+    name: "Base Sepolia",
+    icon: <img src="/assets/Base/Base_Network_Logo.png" alt="Avalanche Fuji" className="h-4 w-4" />,
+  },
 ]
 
 // ThemeToggle component
@@ -21,7 +37,7 @@ const ThemeToggle: React.FC = () => {
       variant="outline"
       size="icon"
       onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-      className="rounded-full text-foreground"
+      className="rounded-full text-foreground border-foreground"
     >
       {theme === "light" ? (
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -59,12 +75,20 @@ export default function Header() {
     ? supportedChains.find((c) => c.id === chain.id) || {
         id: chain.id,
         name: chain.name,
-        icon: <Circle className="h-4 w-4" />,
+        icon: <img src="/assets/default-chain.png" alt="Unknown" className="h-4 w-4" />,
       }
-    : { id: 0, name: "Unknown Network", icon: <Circle className="h-4 w-4" /> }
+    : {
+        id: 0,
+        name: "Unknown Network",
+        icon: <img src="/assets/default-chain.png" alt="Unknown" className="h-4 w-4" />,
+      }
 
   return (
-    <header className="flex w-full items-center justify-between px-6 py-4 z-10">
+    // *** Header JSX ***
+    <header
+      className="flex w-full items-center justify-between px-6 py-4 z-10"
+      style={{ '--base-fill-color': '#6B48FF' } as React.CSSProperties}
+    >
       <div className="font-bold text-xl text-foreground">LUCRA</div>
       <div className="flex items-center gap-4">
         <ThemeToggle />
@@ -73,11 +97,11 @@ export default function Header() {
             return (
               <div
                 {...(!mounted && {
-                  "aria-hidden": true,
+                  'aria-hidden': true,
                   style: {
                     opacity: 0,
-                    pointerEvents: "none",
-                    userSelect: "none",
+                    pointerEvents: 'none',
+                    userSelect: 'none',
                   },
                 })}
               >
@@ -86,7 +110,7 @@ export default function Header() {
                     return (
                       <Button
                         onClick={openConnectModal}
-                        className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-4 py-2"
+                        className="bg-purple text-white hover:bg-purple/90 rounded-full px-4 py-2"
                       >
                         Connect Wallet
                       </Button>
@@ -97,13 +121,13 @@ export default function Header() {
                     <div className="flex items-center gap-2">
                       <Button
                         onClick={openAccountModal}
-                        className="flex items-center gap-1 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-3 py-1.5"
+                        className="flex items-center gap-1 bg-purple text-white hover:bg-purple/90 rounded-full px-3 py-1.5"
                       >
                         <span className="text-sm font-medium">{truncatedAddress}</span>
                       </Button>
                       <Button
                         onClick={openChainModal}
-                        className="flex items-center gap-1 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-3 py-1.5"
+                        className="flex items-center gap-1 bg-purple text-white hover:bg-purple/90 rounded-full px-3 py-1.5"
                       >
                         {currentChain.icon}
                         <span className="text-sm font-medium">{currentChain.name}</span>

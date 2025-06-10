@@ -14,7 +14,7 @@ const queryClient = new QueryClient()
 const config = getDefaultConfig({
   appName: "Lucra App",
   projectId: "773755cc8d60c42417a9024fe65d88dc", 
-  chains: [avalanche, avalancheFuji],
+  chains: [baseSepolia, base, avalancheFuji, avalanche],
   ssr: true,
 })
 
