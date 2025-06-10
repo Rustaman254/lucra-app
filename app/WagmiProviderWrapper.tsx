@@ -7,10 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { avalanche, optimism, baseSepolia, base, avalancheFuji } from "viem/chains"
 import "@rainbow-me/rainbowkit/styles.css" 
 
-// Initialize TanStack Query client
 const queryClient = new QueryClient()
 
-// Configure Wagmi with RainbowKit
 const config = getDefaultConfig({
   appName: "Lucra App",
   projectId: "773755cc8d60c42417a9024fe65d88dc", 
