@@ -1,17 +1,24 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowDown, ChevronDown, Info, X, TrendingUp, Shield, Coins } from "lucide-react";
-import { useAccount, useWriteContract, useContractRead } from "wagmi";
+import { ArrowDown, ChevronDown, X } from "lucide-react";
+import { useAccount, useWriteContract, useReadContract } from "wagmi";
 import { ethers } from "ethers";
 import type { JSX } from "react/jsx-runtime";
 
 // Mapping of chain IDs to DustAggregator contract addresses
 const CONTRACT_ADDRESS_MAP: { [chainId: number]: string } = {
-  84532: "0x07E9a60e43025d14F14086780E67CF3B66fCA842", 
+  84532: "0x2a7051559e3aC6fF3e48d40Ea12E306cF624446a", // Base
 };
 
 const CONTRACT_ABI = [
+  {
+    inputs: [{ internalType: "address", name: "token", type: "address" }],
+    name: "registerToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
   {
     inputs: [
       { internalType: "address", name: "token", type: "address" },
@@ -51,6 +58,36 @@ const CONTRACT_ABI = [
     name: "withdrawAggregatedDust",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "getRegisteredTokens",
+    outputs: [{ internalType: "address[]", name: "", type: "address[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "user", type: "address" }],
+    name: "getUserTokenBalances",
+    outputs: [
+      { internalType: "address[]", name: "tokens", type: "address[]" },
+      { internalType: "uint256[]", name: "balances", type: "uint256[]" },
+      { internalType: "uint256[]", name: "contractBalances", type: "uint256[]" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "token", type: "address" }],
+    name: "getTokenInfo",
+    outputs: [
+      { internalType: "string", name: "symbol", type: "string" },
+      { internalType: "string", name: "name", type: "string" },
+      { internalType: "uint8", name: "decimals", type: "uint8" },
+      { internalType: "bool", name: "success", type: "bool" },
+    ],
+    stateMutability: "view",
     type: "function",
   },
   {
@@ -118,13 +155,11 @@ interface Token {
   name: string;
   icon: JSX.Element;
   balance: string;
+  contractBalance: string;
   value: string;
   color: string;
-  supplyApy: string;
-  borrowApy: string;
-  stakingApy: string;
   address: string;
-  decimals?: number;
+  decimals: number;
 }
 
 interface ThresholdOption {
@@ -139,62 +174,16 @@ const thresholdOptions: ThresholdOption[] = [
   { label: "MAX", value: "MAX" },
 ];
 
-type ModalType = "lend" | "borrow" | "stake" | null;
-
-interface TokenDetailsProps {
-  tokenAddress: string;
-  userAddress: string;
-  onTokenFetched: (token: Token | null) => void;
-}
-
-function TokenDetails({ tokenAddress, userAddress, onTokenFetched }: TokenDetailsProps) {
-  const { data: symbol } = useContractRead({
-    address: tokenAddress as `0x${string}`,
-    abi: TOKEN_ABI,
-    functionName: "symbol",
-  });
-
-  const { data: name } = useContractRead({
-    address: tokenAddress as `0x${string}`,
-    abi: TOKEN_ABI,
-    functionName: "name",
-  });
-
-  const { data: decimals } = useContractRead({
-    address: tokenAddress as `0x${string}`,
-    abi: TOKEN_ABI,
-    functionName: "decimals",
-  });
-
-  const { data: balance } = useContractRead({
-    address: tokenAddress as `0x${string}`,
-    abi: TOKEN_ABI,
-    functionName: "balanceOf",
-    args: [userAddress],
-  });
-
-  useEffect(() => {
-    if (symbol && name && decimals !== undefined && balance !== undefined) {
-      const formattedBalance = ethers.utils.formatUnits(balance.toString(), decimals);
-      onTokenFetched({
-        symbol: symbol as string,
-        name: name as string,
-        icon: <GenericTokenIcon />,
-        balance: formattedBalance,
-        value: `$${parseFloat(formattedBalance).toFixed(2)}`, // Dummy value
-        color: getTokenColor(symbol as string),
-        supplyApy: "5.0", // Dummy APY
-        borrowApy: "6.0", // Dummy APY
-        stakingApy: "7.0", // Dummy APY
-        address: tokenAddress,
-        decimals: decimals as number,
-      });
-    } else if (symbol === undefined || name === undefined || decimals === undefined || balance === undefined) {
-      onTokenFetched(null);
-    }
-  }, [symbol, name, decimals, balance, tokenAddress, onTokenFetched]);
-
-  return null;
+// Dummy token price function (replace with actual price feed integration)
+function getDummyTokenPrice(symbol: string, chainId: number): number {
+  const basePrices: { [key: string]: number } = {
+    BTC: 60000,
+    ETH: 3000,
+    USDC: 1,
+    USDT: 1,
+  };
+  const chainMultiplier = chainId === 43114 ? 1 : 0.95;
+  return (basePrices[symbol] || 1) * chainMultiplier;
 }
 
 function getTokenColor(symbol: string): string {
@@ -214,8 +203,20 @@ function getTokenColor(symbol: string): string {
 
 export default function CryptoSwap() {
   const { address, isConnected, chain } = useAccount();
-  const chainId = chain?.id || 43114; // Default to Avalanche
-  const CONTRACT_ADDRESS = CONTRACT_ADDRESS_MAP[chainId] || CONTRACT_ADDRESS_MAP[43114]; // Fallback to Avalanche
+  const chainId = chain?.id || 84532; // Default to Base
+  const CONTRACT_ADDRESS = CONTRACT_ADDRESS_MAP[chainId] || CONTRACT_ADDRESS_MAP[84532];
+
+  const { data: userTokenData, error: contractError } = useReadContract({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: CONTRACT_ABI,
+    functionName: "getUserTokenBalances",
+    args: [address],
+    query: { enabled: !!isConnected && !!address && !!CONTRACT_ADDRESS },
+  });
+
+  const { writeContractAsync: approveToken } = useWriteContract();
+  const { writeContractAsync: depositDust } = useWriteContract();
+  const { readContract } = useReadContract();
 
   const [selectedFromTokens, setSelectedFromTokens] = useState<Token[]>([]);
   const [selectedToToken, setSelectedToToken] = useState<Token | null>(null);
@@ -223,56 +224,103 @@ export default function CryptoSwap() {
   const [toAmount, setToAmount] = useState<string>("0");
   const [isFromDropdownOpen, setIsFromDropdownOpen] = useState<boolean>(false);
   const [isToDropdownOpen, setIsToDropdownOpen] = useState<boolean>(false);
-  const [showActionOptions, setShowActionOptions] = useState<boolean>(false);
-  const [activeModal, setActiveModal] = useState<ModalType>(null);
-  const [lendAmount, setLendAmount] = useState<string>("");
-  const [borrowAmount, setBorrowAmount] = useState<string>("");
-  const [stakeAmount, setStakeAmount] = useState<string>("");
   const [selectedThreshold, setSelectedThreshold] = useState<ThresholdOption>(thresholdOptions[0]);
   const [isThresholdDropdownOpen, setIsThresholdDropdownOpen] = useState<boolean>(false);
   const [availableTokens, setAvailableTokens] = useState<Token[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const { data: tokenAddresses, error: contractError } = useContractRead({
-    address: CONTRACT_ADDRESS as `0x${string}`,
-    abi: CONTRACT_ABI,
-    functionName: "getWhitelistedTokens",
-    enabled: !!isConnected && !!address && !!CONTRACT_ADDRESS,
-  });
+  const fetchTokensWithBalances = async () => {
+    setIsLoading(true);
+    setError(null);
 
-  const handleTokenFetched = (token: Token | null) => {
-    if (token) {
-      setAvailableTokens((prev) => {
-        if (!prev.some((t) => t.address === token.address)) {
-          return [...prev, token];
+    try {
+      if (!userTokenData) {
+        setAvailableTokens([]);
+        return;
+      }
+
+      const [tokenAddresses, balances, contractBalances] = userTokenData as [string[], bigint[], bigint[]];
+      const tokensWithBalances: Token[] = [];
+
+      for (let i = 0; i < tokenAddresses.length; i++) {
+        const tokenAddress = tokenAddresses[i];
+        try {
+          // Get token info from contract
+          const tokenInfo = await readContract({
+            address: CONTRACT_ADDRESS as `0x${string}`,
+            abi: CONTRACT_ABI,
+            functionName: "getTokenInfo",
+            args: [tokenAddress],
+          });
+
+          const [symbol, name, decimals, success] = tokenInfo as [string, string, number, boolean];
+
+          // Skip if token info fetch failed
+          if (!success) {
+            console.warn(`Token ${tokenAddress} info fetch failed`);
+            continue;
+          }
+
+          const formattedBalance = ethers.formatUnits(balances[i], decimals);
+          const formattedContractBalance = ethers.formatUnits(contractBalances[i], decimals);
+
+          // Only include tokens with balance > 0
+          if (parseFloat(formattedBalance) > 0) {
+            const tokenPrice = getDummyTokenPrice(symbol, chainId);
+            const value = `$${(parseFloat(formattedBalance) * tokenPrice).toFixed(2)}`;
+
+            tokensWithBalances.push({
+              symbol: symbol || tokenAddress.slice(0, 6),
+              name: name || `Token ${tokenAddress.slice(0, 6)}...`,
+              icon: <GenericTokenIcon />,
+              balance: formattedBalance,
+              contractBalance: formattedContractBalance,
+              value,
+              color: getTokenColor(symbol),
+              address: tokenAddress,
+              decimals,
+            });
+          }
+        } catch (error) {
+          console.error(`Failed to fetch details for token ${tokenAddress}:`, error);
+          continue;
         }
-        return prev;
-      });
+      }
+
+      setAvailableTokens(tokensWithBalances);
+
+      // Auto-select the first token as "To" token if none selected
+      if (tokensWithBalances.length > 0 && !selectedToToken) {
+        setSelectedToToken(tokensWithBalances[0]);
+      }
+    } catch (error) {
+      console.error("Failed to load tokens:", error);
+      setError("Failed to load token balances. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (tokenAddresses && address) {
-      setIsLoading(true);
-      setAvailableTokens([]); // Clear previous tokens
-    }
-  }, [tokenAddresses, address]);
+    if (!address || !userTokenData) return;
 
-  useEffect(() => {
-    if (availableTokens.length > 0 && !selectedToToken) {
-      setSelectedToToken(availableTokens[0]);
-    }
-    if (availableTokens.length === (tokenAddresses?.length || 0)) {
-      setIsLoading(false);
-    }
-  }, [availableTokens, tokenAddresses, selectedToToken]);
+    const fetchData = async () => {
+      try {
+        await fetchTokensWithBalances();
+      } catch (error) {
+        console.error("Token loading error:", error);
+        setError("Error loading tokens. Some tokens might not be displayed.");
+      }
+    };
+
+    fetchData();
+  }, [address, userTokenData, chainId, readContract, selectedToToken]);
 
   useEffect(() => {
     if (contractError) {
       console.error("Contract error:", contractError);
-      setError("Failed to fetch whitelisted tokens from contract.");
-      setIsLoading(false);
+      setError("Failed to fetch user token balances from contract.");
     }
   }, [contractError]);
 
@@ -281,13 +329,15 @@ export default function CryptoSwap() {
   }, 0);
 
   const handleFromTokenSelect = (token: Token) => {
-    const isAlreadySelected = selectedFromTokens.some((t) => t.symbol === token.symbol);
+    const isAlreadySelected = selectedFromTokens.some((t) => t.address === token.address);
     let newSelection: Token[];
+
     if (isAlreadySelected) {
-      newSelection = selectedFromTokens.filter((t) => t.symbol !== token.symbol);
+      newSelection = selectedFromTokens.filter((t) => t.address !== token.address);
     } else {
       newSelection = [...selectedFromTokens, token];
     }
+
     setSelectedFromTokens(newSelection);
 
     const totalFromValue = newSelection.reduce((sum, t) => {
@@ -317,7 +367,7 @@ export default function CryptoSwap() {
   };
 
   const removeFromToken = (token: Token) => {
-    const newSelection = selectedFromTokens.filter((t) => t.symbol !== token.symbol);
+    const newSelection = selectedFromTokens.filter((t) => t.address !== token.address);
     setSelectedFromTokens(newSelection);
 
     const totalFromValue = newSelection.reduce((sum, t) => {
@@ -332,9 +382,6 @@ export default function CryptoSwap() {
     }
   };
 
-  const { writeContractAsync: approveToken } = useWriteContract();
-  const { writeContractAsync: depositDust } = useWriteContract();
-
   const handleConsolidate = async () => {
     if (!isConnected || !address || !selectedToToken || !CONTRACT_ADDRESS) {
       setError("Missing wallet connection, target token, or contract address for this chain.");
@@ -343,88 +390,96 @@ export default function CryptoSwap() {
 
     try {
       setError(null);
-      for (const token of selectedFromTokens) {
-        // Approve token
-        await approveToken({
-          address: token.address as `0x${string}`,
-          abi: TOKEN_ABI,
-          functionName: "approve",
-          args: [CONTRACT_ADDRESS as `0x${string}`, ethers.utils.parseUnits(token.balance, token.decimals || 18)],
-        });
+      const successMessages: string[] = [];
+      const errorMessages: string[] = [];
 
-        // Deposit dust
-        await depositDust({
-          address: CONTRACT_ADDRESS as `0x${string}`,
-          abi: CONTRACT_ABI,
-          functionName: "depositDust",
-          args: [token.address as `0x${string}`, ethers.utils.parseUnits(token.balance, token.decimals || 18)],
-        });
+      for (const token of selectedFromTokens) {
+        const balance = Number.parseFloat(token.balance);
+        if (balance > 0) {
+          try {
+            // Approve token
+            await approveToken({
+              address: token.address as `0x${string}`,
+              abi: TOKEN_ABI,
+              functionName: "approve",
+              args: [CONTRACT_ADDRESS as `0x${string}`, ethers.parseUnits(token.balance, token.decimals)],
+            });
+
+            // Deposit dust
+            await depositDust({
+              address: CONTRACT_ADDRESS as `0x${string}`,
+              abi: CONTRACT_ABI,
+              functionName: "depositDust",
+              args: [token.address as `0x${string}`, ethers.parseUnits(token.balance, token.decimals)],
+            });
+
+            successMessages.push(`Successfully processed ${token.symbol || token.address.slice(0, 6)}`);
+          } catch (tokenError) {
+            console.error(`Failed to process token ${token.symbol || token.address}:`, tokenError);
+            errorMessages.push(`Failed to process ${token.symbol || token.address.slice(0, 6)}`);
+            continue;
+          }
+        }
       }
 
-      // Call backend API
-      await fetch("http://localhost:8080/consolidate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address: address,
-          from_tokens: selectedFromTokens.map((t) => t.address),
-          to_token: selectedToToken.address,
-          amount: totalValue,
-          chain_id: chainId,
-        }),
-      });
-      setShowActionOptions(true);
+      // Call backend API for swapping
+      try {
+        await fetch("http://localhost:8080/consolidate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wallet_address: address,
+            from_tokens: selectedFromTokens.map((t) => t.address),
+            to_token: selectedToToken.address,
+            amount: totalValue,
+            chain_id: chainId,
+          }),
+        });
+
+        setSelectedFromTokens([]);
+        setToAmount("0");
+        setFromAmount("0");
+
+        let finalMessage = "";
+        if (successMessages.length > 0) {
+          finalMessage += `Success: ${successMessages.join(", ")}. `;
+        }
+        if (errorMessages.length > 0) {
+          finalMessage += `Errors: ${errorMessages.join(", ")}`;
+        }
+        setError(finalMessage || "Consolidation completed with no tokens processed.");
+      } catch (apiError) {
+        console.error("API call failed:", apiError);
+        setError("Consolidation completed but API update failed.");
+      }
     } catch (error) {
       console.error("Consolidation failed:", error);
       setError("Consolidation failed. Please check your inputs or try again.");
     }
   };
 
-  const openModal = (modalType: ModalType) => {
-    setActiveModal(modalType);
-  };
-
-  const closeModal = () => {
-    setActiveModal(null);
-    setLendAmount("");
-    setBorrowAmount("");
-    setStakeAmount("");
-  };
-
   const handleThresholdSelect = (threshold: ThresholdOption) => {
     setSelectedThreshold(threshold);
     setIsThresholdDropdownOpen(false);
-  };
-
-  const handleAction = async (action: ModalType, amount: string) => {
-    if (!selectedToToken || !amount) {
-      setError("Please select a token and enter an amount.");
-      return;
-    }
-
-    try {
-      setError(null);
-      await fetch(`http://localhost:8080/${action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address: address,
-          token_address: selectedToToken.address,
-          amount: Number.parseFloat(amount),
-          chain_id: chainId,
-        }),
-      });
-      closeModal();
-    } catch (error) {
-      console.error(`${action} failed:`, error);
-      setError(`${action} failed. Please try again.`);
+    if (threshold.value === "MAX") {
+      setSelectedFromTokens(availableTokens);
+    } else {
+      setSelectedFromTokens(
+        availableTokens.filter((token) => Number.parseFloat(token.value.replace("$", "")) <= threshold.value)
+      );
     }
   };
 
   return (
     <div className="relative w-full max-w-md">
       {error && (
-        <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+        <div
+          className={`mb-4 rounded-lg p-3 text-sm ${
+            error.includes("Success") || error.includes("completed")
+              ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400"
+              : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+          }`}
+        >
           {error}
         </div>
       )}
@@ -448,7 +503,7 @@ export default function CryptoSwap() {
                       <div className="flex -space-x-2 mr-2">
                         {selectedFromTokens.slice(0, 2).map((token, i) => (
                           <div
-                            key={token.symbol}
+                            key={token.address}
                             className="flex h-[30px] w-[30px] items-center justify-center rounded-full ring-2 ring-white dark:ring-gray-800"
                             style={{ backgroundColor: token.color, zIndex: 10 - i }}
                           >
@@ -466,7 +521,9 @@ export default function CryptoSwap() {
                       >
                         {selectedFromTokens[0]?.icon || <GenericTokenIcon />}
                       </div>
-                      <span className="font-medium dark:text-white">{selectedFromTokens[0]?.symbol || "Select"}</span>
+                      <span className="font-medium dark:text-white">
+                        {selectedFromTokens[0]?.symbol || "Select"}
+                      </span>
                     </>
                   )}
                   <ChevronDown className="ml-1 h-4 w-4 dark:text-gray-400" />
@@ -478,35 +535,48 @@ export default function CryptoSwap() {
                       Select dust tokens to consolidate
                     </div>
                     <div className="max-h-60 overflow-y-auto">
-                      {availableTokens.map((token) => {
-                        const isSelected = selectedFromTokens.some((t) => t.symbol === token.symbol);
-                        return (
-                          <button
-                            key={token.symbol}
-                            onClick={() => handleFromTokenSelect(token)}
-                            className={`flex w-full items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700 ${
-                              isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div
-                                className="flex h-8 w-8 items-center justify-center rounded-full"
-                                style={{ backgroundColor: token.color }}
-                              >
-                                {token.icon}
+                      {availableTokens.length > 0 ? (
+                        availableTokens.map((token) => {
+                          const isSelected = selectedFromTokens.some((t) => t.address === token.address);
+                          return (
+                            <button
+                              key={token.address}
+                              onClick={() => handleFromTokenSelect(token)}
+                              className={`flex w-full items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                                isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className="flex h-8 w-8 items-center justify-center rounded-full"
+                                  style={{ backgroundColor: token.color }}
+                                >
+                                  {token.icon}
+                                </div>
+                                <div className="text-left">
+                                  <div className="font-medium dark:text-white">
+                                    {token.symbol || token.address.slice(0, 6) + '...'}
+                                  </div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                                    {token.name || 'Unknown Token'}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="text-left">
-                                <div className="font-medium dark:text-white">{token.symbol}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">{token.name}</div>
+                              <div className="text-right">
+                                <div className="text-sm font-medium dark:text-white">{token.balance}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">{token.value}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">
+                                  In Contract: {token.contractBalance}
+                                </div>
                               </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-sm font-medium dark:text-white">{token.balance}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">{token.value}</div>
-                            </div>
-                          </button>
-                        );
-                      })}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                          {isLoading ? "Loading tokens..." : "No tokens found in your wallet"}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -528,7 +598,7 @@ export default function CryptoSwap() {
                 <div className="flex flex-wrap gap-1.5">
                   {selectedFromTokens.map((token) => (
                     <div
-                      key={token.symbol}
+                      key={token.address}
                       className="flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-700"
                     >
                       <div
@@ -537,7 +607,7 @@ export default function CryptoSwap() {
                       >
                         <span className="text-[8px] text-white">{token.icon}</span>
                       </div>
-                      <span className="mr-1 dark:text-white">{token.symbol}</span>
+                      <span className="mr-1 dark:text-white">{token.symbol || token.address.slice(0, 6)}</span>
                       <button
                         onClick={() => removeFromToken(token)}
                         className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
@@ -619,7 +689,7 @@ export default function CryptoSwap() {
                     <div className="max-h-60 overflow-y-auto">
                       {availableTokens.map((token) => (
                         <button
-                          key={token.symbol}
+                          key={token.address}
                           onClick={() => handleToTokenSelect(token)}
                           className="flex w-full items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700"
                         >
@@ -631,13 +701,20 @@ export default function CryptoSwap() {
                               {token.icon}
                             </div>
                             <div className="text-left">
-                              <div className="font-medium dark:text-white">{token.symbol}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">{token.name}</div>
+                              <div className="font-medium dark:text-white">
+                                {token.symbol || token.address.slice(0, 6) + '...'}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {token.name || 'Unknown Token'}
+                              </div>
                             </div>
                           </div>
                           <div className="text-right">
                             <div className="text-sm font-medium dark:text-white">{token.balance}</div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">{token.value}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              In Contract: {token.contractBalance}
+                            </div>
                           </div>
                         </button>
                       ))}
@@ -655,58 +732,16 @@ export default function CryptoSwap() {
                 className="w-full border-none bg-transparent p-0 text-2xl font-medium outline-none dark:text-white"
               />
             </div>
-
-            <div className="mt-4 flex items-center justify-between">
-              <div className="flex items-center text-xs text-[#666666] dark:text-gray-400">
-                Estimated Fee: $3.00
-                <Info className="ml-1 h-3 w-3" />
-              </div>
-            </div>
           </div>
 
           <div className="p-6 pt-0">
-            {!showActionOptions ? (
-              <button
-                onClick={handleConsolidate}
-                className="w-full rounded-lg bg-[#6B48FF] py-3 text-white font-medium hover:bg-[#5a3dd9] transition-colors"
-                disabled={!selectedFromTokens.length || !selectedToToken || !CONTRACT_ADDRESS || !isConnected}
-              >
-                {CONTRACT_ADDRESS ? "Consolidate" : "Chain Not Supported"}
-              </button>
-            ) : (
-              <div className="space-y-3">
-                <div className="text-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                  What would you like to do with your {selectedToToken?.symbol || "token"}?
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => openModal("lend")}
-                    className="flex flex-col items-center rounded-lg bg-emerald-600 py-3 text-white font-medium hover:bg-emerald-700 transition-colors"
-                  >
-                    <TrendingUp className="h-4 w-4 mb-1" />
-                    <span className="text-sm">Lend</span>
-                    <span className="text-xs opacity-90">{selectedToToken?.supplyApy || "0"}% APY</span>
-                  </button>
-                  <button
-                    onClick={() => openModal("borrow")}
-                    className="flex flex-col items-center rounded-lg bg-blue-600 py-3 text-white font-medium hover:bg-blue-700 transition-colors"
-                  >
-                    <Shield className="h-4 w-4 mb-1" />
-                    <span className="text-sm">Borrow</span>
-                    <span className="text-xs opacity-90">{selectedToToken?.borrowApy || "0"}% APY</span>
-                  </button>
-                </div>
-
-                <button
-                  onClick={() => openModal("stake")}
-                  className="w-full flex items-center justify-center rounded-lg bg-purple-600 py-3 text-white font-medium hover:bg-purple-700 transition-colors"
-                >
-                  <Coins className="mr-2 h-4 w-4" />
-                  Stake {selectedToToken?.symbol || "token"} ({selectedToToken?.stakingApy || "0"}% APY)
-                </button>
-              </div>
-            )}
+            <button
+              onClick={handleConsolidate}
+              className="w-full rounded-lg bg-[#6B48FF] py-3 text-white font-medium hover:bg-[#5a3dd9] transition-colors"
+              disabled={!selectedFromTokens.length || !selectedToToken || !CONTRACT_ADDRESS || !isConnected}
+            >
+              {CONTRACT_ADDRESS ? "Consolidate" : "Chain Not Supported"}
+            </button>
           </div>
         </div>
       ) : (
@@ -714,309 +749,6 @@ export default function CryptoSwap() {
           Please connect your wallet using the header to proceed.
         </div>
       )}
-
-      {activeModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-[20px] p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold dark:text-white">
-                {activeModal === "lend" && `Lend ${selectedToToken?.symbol || ""}`}
-                {activeModal === "borrow" && `Borrow ${selectedToToken?.symbol || ""}`}
-                {activeModal === "stake" && `Stake ${selectedToToken?.symbol || ""}`}
-              </h2>
-              <button
-                onClick={closeModal}
-                className="rounded-full p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <X className="h-5 w-5 dark:text-gray-400" />
-              </button>
-            </div>
-
-            {activeModal === "lend" && (
-              <div className="space-y-4">
-                <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-4">
-                  <h3 className="font-medium text-emerald-700 dark:text-emerald-400 mb-3">
-                    Morpho Lending Pool
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="text-gray-600 dark:text-gray-400">Supply APY:</div>
-                    <div className="text-right font-medium text-emerald-600 dark:text-emerald-400">
-                      {selectedToToken?.supplyApy || "0"}%
-                    </div>
-                    <div className="text-gray-600 dark:text-gray-400">Total Supply:</div>
-                    <div className="text-right font-medium">$24.5M</div>
-                    <div className="text-gray-600 dark:text-gray-400">Utilization:</div>
-                    <div className="text-right font-medium">68%</div>
-                    <div className="text-gray-600 dark:text-gray-400">Your Supply:</div>
-                    <div className="text-right font-medium">0 {selectedToToken?.symbol || ""}</div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Supply Amount
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={lendAmount}
-                      onChange={(e) => setLendAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 pr-16 text-right dark:text-white"
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 dark:text-gray-400">
-                      {selectedToToken?.symbol || ""}
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    <span>
-                      Available: {selectedToToken?.balance || "0"} {selectedToToken?.symbol || ""}
-                    </span>
-                    <button
-                      onClick={() => setLendAmount(selectedToToken?.balance || "")}
-                      className="text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      MAX
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-lg bg-gray-50 dark:bg-gray-700 p-3">
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Estimated Earnings</div>
-                  <div className="font-medium dark:text-white">
-                    {lendAmount
-                      ? (
-                          (Number.parseFloat(lendAmount) * Number.parseFloat(selectedToToken?.supplyApy || "0")) /
-                          100
-                        ).toFixed(4)
-                      : "0.0000"}{" "}
-                    {selectedToToken?.symbol || ""}/year
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    Protocol fee: 10% (shared with LUCRA)
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={closeModal}
-                    className="rounded-lg border border-gray-300 dark:border-gray-700 py-2 font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    disabled={!lendAmount}
-                    onClick={() => handleAction("lend", lendAmount)}
-                    className="rounded-lg bg-emerald-600 py-2 text-white font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Supply
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeModal === "borrow" && (
-              <div className="space-y-4">
-                <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4">
-                  <h3 className="font-medium text-blue-700 dark:text-blue-400 mb-3">
-                    Morpho Borrowing Pool
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="text-gray-600 dark:text-gray-400">Borrow APY:</div>
-                    <div className="text-right font-medium text-blue-600 dark:text-blue-400">
-                      {selectedToToken?.borrowApy || "0"}%
-                    </div>
-                    <div className="text-gray-600 dark:text-gray-400">Available:</div>
-                    <div className="text-right font-medium">$12.3M</div>
-                    <div className="text-gray-600 dark:text-gray-400">Collateral Factor:</div>
-                    <div className="text-right font-medium">75%</div>
-                    <div className="text-gray-600 dark:text-gray-400">Your Debt:</div>
-                    <div className="text-right font-medium">0 {selectedToToken?.symbol || ""}</div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Borrow Amount
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={borrowAmount}
-                      onChange={(e) => setBorrowAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 pr-16 text-right dark:text-white"
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 dark:text-gray-400">
-                      {selectedToToken?.symbol || ""}
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    <span>
-                      Max: {(Number.parseFloat(toAmount) * 0.75).toFixed(2)} {selectedToToken?.symbol || ""}
-                    </span>
-                    <button
-                      onClick={() => setBorrowAmount((Number.parseFloat(toAmount) * 0.75).toFixed(2))}
-                      className="text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      MAX
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-lg bg-gray-50 dark:bg-gray-700 p-3">
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Interest Cost</div>
-                  <div className="font-medium dark:text-white">
-                    {borrowAmount
-                      ? (
-                          (Number.parseFloat(borrowAmount) * Number.parseFloat(selectedToToken?.borrowApy || "0")) /
-                          100
-                        ).toFixed(4)
-                      : "0.0000"}{" "}
-                    {selectedToToken?.symbol || ""}/year
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    Health Factor:{" "}
-                    {borrowAmount
-                      ? (75 / ((Number.parseFloat(borrowAmount) / Number.parseFloat(toAmount)) * 100)).toFixed(2)
-                      : "∞"}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={closeModal}
-                    className="rounded-lg border border-gray-300 dark:border-gray-700 py-2 font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    disabled={!borrowAmount}
-                    onClick={() => handleAction("borrow", borrowAmount)}
-                    className="rounded-lg bg-blue-600(py-2 text-white font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Borrow
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeModal === "stake" && (
-              <div className="space-y-4">
-                <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-4">
-                  <h3 className="font-medium text-purple-700 dark:text-purple-400 mb-3">
-                    LUCRA Staking Pool
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="text-gray-600 dark:text-gray-400">Staking APY:</div>
-                    <div className="text-right font-medium text-purple-600 dark:text-purple-400">
-                      {selectedToToken?.stakingApy || "0"}%
-                    </div>
-                    <div className="text-gray-600 dark:text-gray-400">Total Staked:</div>
-                    <div className="text-right font-medium">$18.2M</div>
-                    <div className="text-gray-600 dark:text-gray-400">Lock Period:</div>
-                    <div className="text-right font-medium">30 days</div>
-                    <div className="text-gray-600 dark:text-gray-400">Your Stake:</div>
-                    <div className="text-right font-medium">0 {selectedToToken?.symbol || ""}</div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Stake Amount
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={stakeAmount}
-                      onChange={(e) => setStakeAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 pr-16 text-right dark:text-white"
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 dark:text-gray-400">
-                      {selectedToToken?.symbol || ""}
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    <span>
-                      Available: {selectedToToken?.balance || "0"} {selectedToToken?.symbol || ""}
-                    </span>
-                    <button
-                      onClick={() => setStakeAmount(selectedToToken?.balance || "")}
-                      className="text-purple-600 dark:text-purple-400 hover:underline"
-                    >
-                      MAX
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-lg bg-gray-50 dark:bg-gray-700 p-3">
-                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">Reward Breakdown</div>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">Your Rewards:</span>
-                      <span className="font-medium dark:text-white">
-                        {stakeAmount
-                          ? (
-                              ((Number.parseFloat(stakeAmount) * Number.parseFloat(selectedToToken?.stakingApy || "0")) /
-                                100) *
-                              0.85
-                            ).toFixed(4)
-                          : "0.0000"}{" "}
-                        {selectedToToken?.symbol || ""}/year
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">LUCRA Fee (15%):</span>
-                      <span className="font-medium text-purple-600 dark:text-purple-400">
-                        {stakeAmount
-                          ? (
-                              ((Number.parseFloat(stakeAmount) * Number.parseFloat(selectedToToken?.stakingApy || "0")) /
-                                100) *
-                              0.15
-                            ).toFixed(4)
-                          : "0.0000"}{" "}
-                        {selectedToToken?.symbol || ""}/year
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 p-3">
-                  <div className="text-sm text-yellow-700 dark:text-yellow-400">
-                    ⚠️ Warning: Staked tokens are locked for 30 days. Early withdrawal incurs a 5% penalty.
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={closeModal}
-                    className="rounded-lg border border-gray-300 dark:border-gray-700 py-2 font-medium hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-white"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    disabled={!stakeAmount}
-                    onClick={() => handleAction("stake", stakeAmount)}
-                    className="rounded-lg bg-purple-600 py-2 text-white font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Stake
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tokenAddresses && address && (tokenAddresses as string[]).map((tokenAddress) => (
-        <TokenDetails
-          key={tokenAddress}
-          tokenAddress={tokenAddress}
-          userAddress={address}
-          onTokenFetched={handleTokenFetched}
-        />
-      ))}
     </div>
   );
 }
